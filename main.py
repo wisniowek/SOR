@@ -1,33 +1,46 @@
-from fastapi import FastAPI, Query
 import pandas as pd
-from datetime import datetime
+from fastapi import FastAPI, HTTPException
+from pathlib import Path
 
 app = FastAPI()
 
-# Ścieżka do pliku w repozytorium GitHub
-FILE_PATH = "rejestr_sor_20250319.xlsx"
-df_sor = pd.read_excel(FILE_PATH, sheet_name="Rejestr śor")
+# Ścieżka do pliku Excel ( upewnij się, że plik jest w repozytorium )
+EXCEL_FILE_PATH = Path(__file__).parent / "rejestr_sor_20250319.xlsx"
 
-def filter_products(problem: str, uprawa: str):
-    """Filtruje środki ochrony roślin na podstawie problemu i uprawy."""
-    df = df_sor.astype(str).apply(lambda x: x.str.lower())
-    problem = problem.lower()
-    uprawa = uprawa.lower()
-    
-    filtered_df = df[(df["Rodzaj środka"].str.contains(problem, na=False)) &
-                     (df["Zakres stosowania"].str.contains(uprawa, na=False))]
-    
-    today = datetime.today().strftime('%Y-%m-%d')
-    if "Termin ważności zezwolenia" in filtered_df.columns:
-        filtered_df = filtered_df[pd.to_datetime(filtered_df["Termin ważności zezwolenia"], errors='coerce') > today]
-    
-    return filtered_df[["Nazwa środka", "Substancja czynna", "Rodzaj środka", "Termin ważności zezwolenia"]].to_dict(orient="records")
+def load_excel_data():
+    try:
+        # Zakładam, że dane znajdują się w arkuszu "Rejestr śor"
+        df = pd.read_excel(EXCEL_FILE_PATH, sheet_name="Rejestr śor")
+        return df
+    except Exception as e:
+        # Loguj błąd przy ładowaniu danych
+        raise Exception(f"Could not load Excel data: {e}")
+
+# Ładowanie danych przy starcie aplikacji
+try:
+    excel_data = load_excel_data()
+except Exception as e:
+    excel_data = None
+    print(f"Error loading Excel data: {e}")
+
+@app.get("/")
+def read_root():
+    return {"message": "Witaj w API SOR!"}
 
 @app.get("/recommend")
-def recommend(problem: str = Query(..., description="Problem (np. chwasty, mszyce)"),
-              uprawa: str = Query(..., description="Uprawa (np. pszenica, jabłoń)")):
-    """Zwraca listę rekomendowanych środków ochrony roślin."""
-    results = filter_products(problem, uprawa)
-    if results:
-        return {"status": "success", "recommendations": results}
-    return {"status": "error", "message": "Brak dostępnych środków dla podanych kryteriów."}
+def recommend(uprawa: str, problem: str):
+    if excel_data is None:
+        raise HTTPException(status_code=500, detail="Excel data not loaded")
+    try:
+        # Prosty przykład filtrowania – należy dostosować do struktury pliku Excel
+        mask = excel_data.apply(
+            lambda row: (uprawa.lower() in str(row).lower()) and (problem.lower() in str(row).lower()),
+            axis=1
+        )
+        results = excel_data[mask].to_dict(orient="records")
+        if not results:
+            return {"recommendations": "No matching records found"}
+        return {"recommendations": results}
+    except Exception as e:
+        # Złapanie ewentualnych błędów podczas filtrowania
+        raise HTTPException(status_code=500, detail=str(e))
