@@ -1,46 +1,69 @@
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from sentence_transformers import SentenceTransformer, util
 from pathlib import Path
 
 app = FastAPI()
 
-# Ścieżka do pliku Excel ( upewnij się, że plik jest w repozytorium )
+# Określ ścieżkę do pliku Excel
 EXCEL_FILE_PATH = Path(__file__).parent / "rejestr_sor_20250319.xlsx"
 
 def load_excel_data():
     try:
-        # Zakładam, że dane znajdują się w arkuszu "Rejestr śor"
+        # Przyjmujemy, że dane znajdują się w arkuszu "Rejestr śor"
         df = pd.read_excel(EXCEL_FILE_PATH, sheet_name="Rejestr śor")
         return df
     except Exception as e:
-        # Loguj błąd przy ładowaniu danych
         raise Exception(f"Could not load Excel data: {e}")
 
-# Ładowanie danych przy starcie aplikacji
+# Ładujemy dane z Excela
 try:
-    excel_data = load_excel_data()
+    df = load_excel_data()
 except Exception as e:
-    excel_data = None
-    print(f"Error loading Excel data: {e}")
+    df = None
+    print(f"Error loading excel: {e}")
+
+# Inicjalizujemy model do generowania wektorów
+model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+
+# Jeśli nie istnieje kolumna 'opis', spróbuj stworzyć ją z pozostałych danych (możesz to dostosować)
+if df is not None and 'opis' not in df.columns:
+    df['opis'] = df.apply(lambda row: " ".join(str(x) for x in row.values), axis=1)
+
+# Precompute embeddingów dla wszystkich wpisów
+if df is not None:
+    df['vector'] = df['opis'].apply(lambda x: model.encode(str(x), convert_to_tensor=True))
 
 @app.get("/")
 def read_root():
-    return {"message": "Witaj w API SOR!"}
+    return {"message": "Witaj w API SOR z AI wyszukiwarką!"}
 
 @app.get("/recommend")
-def recommend(uprawa: str, problem: str):
-    if excel_data is None:
+def recommend(query: str):
+    """
+    Endpoint przyjmujący parametr query.
+    Generuje wektor zapytania i oblicza kosinusową miarę podobieństwa z opisami środków.
+    Zwraca listę rekomendacji spełniających ustalony próg podobieństwa.
+    """
+    if df is None:
         raise HTTPException(status_code=500, detail="Excel data not loaded")
     try:
-        # Prosty przykład filtrowania – należy dostosować do struktury pliku Excel
-        mask = excel_data.apply(
-            lambda row: (uprawa.lower() in str(row).lower()) and (problem.lower() in str(row).lower()),
-            axis=1
-        )
-        results = excel_data[mask].to_dict(orient="records")
-        if not results:
+        query_vector = model.encode(query, convert_to_tensor=True)
+        recommendations = []
+        for idx, row in df.iterrows():
+            similarity = util.pytorch_cos_sim(query_vector, row['vector']).item()
+            recommendations.append((similarity, row.to_dict()))
+
+        # Sortujemy wyniki malejąco według podobieństwa
+        recommendations.sort(key=lambda x: x[0], reverse=True)
+
+        # Ustal próg podobieństwa, np. 0.5 – możesz dostosować
+        filtered = [rec for rec in recommendations if rec[0] >= 0.5]
+        if not filtered:
             return {"recommendations": "No matching records found"}
-        return {"recommendations": results}
+        
+        # Zwracamy top 5 rekomendacji
+        top = filtered[:5]
+        return {"recommendations": [{"similarity": sim, "data": data} for sim, data in top]}
     except Exception as e:
-        # Złapanie ewentualnych błędów podczas filtrowania
         raise HTTPException(status_code=500, detail=str(e))
