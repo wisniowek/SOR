@@ -6,10 +6,10 @@ from pathlib import Path
 
 app = FastAPI()
 
-# Ścieżka do pliku Excel
+# Lokalna ścieżka i URL (zmień na swój publiczny link)
 EXCEL_FILE_PATH = Path(__file__).parent / "Rejestr_zastosowanie.xlsx"
+EXCEL_FILE_URL  = "https://raw.githubusercontent.com/<USER>/<REPO>/main/Rejestr_zastosowanie.xlsx"
 
-# Mapowanie nazw kolumn
 COLUMN_MAPPING = {
     "nazwa": "Nazwa",
     "NrZezw": "Numer zezwolenia",
@@ -28,123 +28,50 @@ COLUMN_MAPPING = {
     "srodek_mikrobiologiczny": "Środek mikrobiologiczny"
 }
 
-def load_excel_data():
-    print(f"Checking if the Excel file exists at {EXCEL_FILE_PATH}")
-    if not EXCEL_FILE_PATH.exists():
-        print(f"File not found: {EXCEL_FILE_PATH}")
-        raise Exception(f"Plik Excel nie został znaleziony: {EXCEL_FILE_PATH}")
-    
+def load_excel_data() -> pd.DataFrame:
     try:
-        # Wczytanie danych z arkusza "Rejestr_zastosowanie"
-        print(f"Loading Excel file from {EXCEL_FILE_PATH}")
-        df = pd.read_excel(EXCEL_FILE_PATH, sheet_name="Rejestr_zastosowanie")
-        print("Excel file loaded successfully")
-        print(f"Columns in the Excel file: {df.columns.tolist()}")
+        if EXCEL_FILE_PATH.exists():
+            path = EXCEL_FILE_PATH
+            print(f"Loading Excel from disk: {path}")
+        else:
+            path = EXCEL_FILE_URL
+            print(f"Local file not found, loading Excel from URL: {path}")
+        df = pd.read_excel(path, sheet_name="Rejestr_zastosowanie")
+        df.rename(columns=COLUMN_MAPPING, inplace=True)
+        df["opis"] = df.astype(str).agg(" ".join, axis=1)
         return df
-    except FileNotFoundError:
-        print("Excel file not found")
-        raise Exception("Plik Excel nie został znaleziony.")
-    except ValueError as e:
-        print(f"ValueError loading Excel file: {e}")
-        raise Exception(f"Nie udało się załadować danych z Excela: {e}")
     except Exception as e:
-        print(f"Unknown error loading Excel file: {e}")
-        raise Exception(f"Nieznany błąd podczas ładowania Excela: {e}")
+        raise RuntimeError(f"Failed to load Excel: {e}")
 
-# Wczytaj dane
 try:
     df = load_excel_data()
-    # Zmapuj nazwy kolumn na bardziej opisowe
-    df.rename(columns=COLUMN_MAPPING, inplace=True)
+    model = SentenceTransformer("paraphrase-MiniLM-L6-v2")
+    df["vector"] = df["opis"].apply(lambda t: model.encode(t, convert_to_tensor=True))
+    print("✅ Data and model ready")
 except Exception as e:
     df = None
-    print(f"Błąd podczas ładowania Excela: {e}")
-
-# Inicjalizacja modelu do generowania wektorów
-model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
-
-# Łączenie wszystkich kolumn w jedną kolumnę 'opis'
-if df is not None:
-    df['opis'] = df.apply(lambda row: " ".join(str(x) for x in row.values), axis=1)
-
-# Precompute embeddingów dla opisów w danych
-if df is not None:
-    df['vector'] = df['opis'].apply(lambda x: model.encode(str(x), convert_to_tensor=True))
+    print(f"❌ Initialization error: {e}")
 
 @app.get("/")
-def read_root():
-    return {"message": "Witaj w API SOR z wyszukiwarką AI!"}
+def root():
+    return {"message": "SOR API is alive!"}
+
+def cosine_recs(query: str, threshold=0.5, limit=5):
+    q_vec = model.encode(query, convert_to_tensor=True)
+    sims = df["vector"].apply(lambda v: util.pytorch_cos_sim(q_vec, v).item())
+    df_out = df.assign(similarity=sims).query("similarity >= @threshold")
+    df_out = df_out.sort_values("similarity", ascending=False)
+    return df_out.head(limit if len(df_out)>limit else len(df_out)).to_dict(orient="records")
 
 @app.get("/recommend")
-def recommend(query: str = Query(None), problem: str = Query(None), uprawa: str = Query(None), show_all: bool = Query(False, description="Czy wyświetlić wszystkie wyniki, jeśli jest ich więcej niż 5")):
-    """
-    Endpoint przyjmujący zapytanie w parametrze 'query', 'problem' i 'uprawa'.
-    Używa modelu SentenceTransformer do generowania wektora zapytania.
-    Następnie oblicza kosinusowe podobieństwo pomiędzy zapytaniem a opisami i zwraca
-    top 5 wyników o podobieństwie równym lub większym niż 0.5.
-    """
-    if query is None:
-        query_parts = filter(None, [problem, uprawa])
-        query = " ".join(query_parts)
-        if not query:
-            raise HTTPException(status_code=400, detail="Query parameter is required")
-
+def recommend(query: str = Query(...), show_all: bool = False):
     if df is None:
-        raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane")
-    try:
-        query_vector = model.encode(query, convert_to_tensor=True)
-        recommendations = []
-        for idx, row in df.iterrows():
-            similarity = util.pytorch_cos_sim(query_vector, row['vector']).item()
-            recommendations.append((similarity, row.to_dict()))
-        
-        # Sortowanie wyników malejąco według podobieństwa
-        recommendations.sort(key=lambda x: x[0], reverse=True)
-
-        # Ustal próg podobieństwa
-        filtered = [rec for rec in recommendations if rec[0] >= 0.5]
-        
-        # Zwróć top 5 wyników lub wszystkie, jeśli użytkownik wybrał show_all
-        if len(filtered) > 5 and not show_all:
-            return {"message": "Jest więcej dopasowań, wyświetlić wszystkie?", "recommendations": [{"similarity": sim, "data": data} for sim, data in filtered[:5]]}
-        
-        return {"recommendations": [{"similarity": sim, "data": data} for sim, data in filtered]}
-    except Exception as e:
-        print(f"Error in /recommend endpoint: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/search")
-def search(query: str):
-    """
-    Endpoint do wyszukiwania po różnych polach, takich jak uprawa, agrofag, zastosowanie,
-    nazwy środków oraz substancje czynne.
-    """
-    if df is None:
-        raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane")
-    try:
-        query_vector = model.encode(query, convert_to_tensor=True)
-        search_results = []
-        
-        for idx, row in df.iterrows():
-            fields = ['Uprawa', 'Agrofag', 'Zastosowanie', 'Nazwa', 'Substancja czynna']
-            for field in fields:
-                if field in row:
-                    field_vector = model.encode(str(row[field]), convert_to_tensor=True)
-                    similarity = util.pytorch_cos_sim(query_vector, field_vector).item()
-                    search_results.append((field, similarity, row.to_dict()))
-        
-        # Sortowanie wyników malejąco według podobieństwa
-        search_results.sort(key=lambda x: x[1], reverse=True)
-        
-        # Filtruj wyniki, aby zwrócić tylko te z podobieństwem >= 0.5
-        filtered_results = [result for result in search_results if result[1] >= 0.5]
-        
-        return {"search_results": [{"field": field, "similarity": sim, "data": data} for field, sim, data in filtered_results]}
-    except Exception as e:
-        print(f"Error in /search endpoint: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, "Excel data not loaded")
+    recs = cosine_recs(query)
+    if not show_all and len(recs) > 5:
+        return {"message": "More results available", "recommendations": recs[:5]}
+    return {"recommendations": recs}
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
