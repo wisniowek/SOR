@@ -1,58 +1,50 @@
-from fastapi import FastAPI, HTTPException
-from sentence_transformers import SentenceTransformer, util
-import pandas as pd
+from fastapi import FastAPI, HTTPException, Query
 import os
+import pandas as pd
 
 app = FastAPI()
 
-# 🔍 Ścieżka do Excela
+# Ścieżka do Excela
 excel_path = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
 
-# 📥 Wczytanie danych z Excela
+print("🔥 Start prostej wersji (bez AI)")
 print("📁 Ścieżka do pliku Excel:", excel_path)
-print("📅 Wczytywanie Excela...")
 
 try:
-    df = pd.read_excel(excel_path)
-    print("✅ Wczytano Excel – liczba wierszy:", len(df))
+    df = pd.read_excel(excel_path, sheet_name="Rejestr_zastosowanie")
+    df.columns = df.columns.str.strip()
+    print(f"✅ Wczytano Excel – liczba wierszy: {len(df)}, kolumny: {df.columns.tolist()}")
 except Exception as e:
+    print("❌ Błąd wczytywania Excela:", e)
     df = None
-    print("❌ Błąd podczas wczytywania Excela:", e)
-
-# 🧠 Załaduj model SentenceTransformer
-print("🧠 Wczytywanie modelu AI...")
-model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-print("✅ Model załadowany")
-
-# ✨ Przygotuj embeddingi z kolumny 'nazwa'
-if df is not None:
-    try:
-        texts = df["nazwa"].astype(str).tolist()
-        embeddings = model.encode(texts, convert_to_tensor=True)
-    except Exception as e:
-        print("❌ Błąd przy generowaniu embeddingów:", e)
-        df = None
-        embeddings = None
 
 @app.get("/")
-def root():
-    return {"message": "Witaj w API SOR z wyszukiwarką AI!"}
+def home():
+    if df is None:
+        return {"message": "Brak danych Excel. Sprawdź logi."}
+    return {"message": "API SOR – proste wyszukiwanie bez AI (test polskich znaków: ą, ś, ć, ź, ż)"}
 
-@app.get("/recommend")
-def recommend(query: str):
-    if df is None or embeddings is None:
-        raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane")
+@app.get("/search")
+def search(q: str = Query(..., description="Wpisz np. ziemniaki, truskawki itp.")):
+    """
+    Proste wyszukiwanie w kolumnach 'nazwa' i 'uprawa'.
+    Wyszukiwanie case-insensitive, na zasadzie substring match.
+    """
+    if df is None:
+        raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane.")
 
-    # 🔍 Przetwórz zapytanie
-    query_embedding = model.encode(query, convert_to_tensor=True)
-    hits = util.semantic_search(query_embedding, embeddings, top_k=5)[0]
+    # Filtr po kolumnie 'nazwa' i 'uprawa' (case-insensitive)
+    mask_nazwa = df["nazwa"].str.contains(q, case=False, na=False)
+    mask_uprawa = df["uprawa"].str.contains(q, case=False, na=False)
 
-    results = []
-    for hit in hits:
-        idx = hit["corpus_id"]
-        score = hit["score"]
-        row = df.iloc[idx].to_dict()
-        row["score"] = round(float(score), 3)
-        results.append(row)
+    # Rekordy pasujące w 'nazwa' LUB w 'uprawa'
+    results = df[mask_nazwa | mask_uprawa].copy()
 
-    return {"results": results}
+    # Konwertuj do listy słowników
+    data = results.to_dict(orient="records")
+
+    return {
+        "zapytanie": q,
+        "liczba_wynikow": len(data),
+        "wyniki": data
+    }
