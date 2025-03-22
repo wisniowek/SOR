@@ -1,5 +1,4 @@
 import os
-
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from sentence_transformers import SentenceTransformer, util
