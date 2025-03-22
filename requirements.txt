@@ -3,3 +3,4 @@ pandas
 requests
 sentence-transformers
 uvicorn
+openpyxl
