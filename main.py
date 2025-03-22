@@ -1,4 +1,5 @@
 import os
+
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from sentence_transformers import SentenceTransformer, util
@@ -12,13 +13,18 @@ EXCEL_FILE_PATH = Path(__file__).parent / "Rejestr_zastosowanie.xlsx"
 def load_excel_data():
     try:
         # Wczytanie danych z arkusza "Rejestr_zastosowanie"
+        print(f"Loading Excel file from {EXCEL_FILE_PATH}")
         df = pd.read_excel(EXCEL_FILE_PATH, sheet_name="Rejestr_zastosowanie")
+        print("Excel file loaded successfully")
         return df
     except FileNotFoundError:
+        print("Excel file not found")
         raise Exception("Plik Excel nie został znaleziony.")
     except ValueError as e:
+        print(f"ValueError loading Excel file: {e}")
         raise Exception(f"Nie udało się załadować danych z Excela: {e}")
     except Exception as e:
+        print(f"Unknown error loading Excel file: {e}")
         raise Exception(f"Nieznany błąd podczas ładowania Excela: {e}")
 
 # Wczytaj dane
