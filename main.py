@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from sentence_transformers import SentenceTransformer, util
@@ -5,16 +7,20 @@ from pathlib import Path
 
 app = FastAPI()
 
-# Ścieżka do nowego pliku Excel
+# Ścieżka do pliku Excel
 EXCEL_FILE_PATH = Path(__file__).parent / "Rejestr_zastosowanie.xlsx"
 
 def load_excel_data():
     try:
-        # Wczytanie danych z arkusza "Rejestr śor"
-        df = pd.read_excel(EXCEL_FILE_PATH, sheet_name="Rejestr śor")
+        # Wczytanie danych z arkusza "Rejestr_zastosowanie"
+        df = pd.read_excel(EXCEL_FILE_PATH, sheet_name="Rejestr_zastosowanie")
         return df
-    except Exception as e:
+    except FileNotFoundError:
+        raise Exception("Plik Excel nie został znaleziony.")
+    except ValueError as e:
         raise Exception(f"Nie udało się załadować danych z Excela: {e}")
+    except Exception as e:
+        raise Exception(f"Nieznany błąd podczas ładowania Excela: {e}")
 
 # Wczytaj dane
 try:
@@ -26,8 +32,8 @@ except Exception as e:
 # Inicjalizacja modelu do generowania wektorów
 model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
 
-# Upewnij się, że kolumna 'opis' istnieje; jeśli nie, stwórz ją łącząc wszystkie kolumny
-if df is not None and 'opis' not in df.columns:
+# Łączenie wszystkich kolumn w jedną kolumnę 'opis'
+if df is not None:
     df['opis'] = df.apply(lambda row: " ".join(str(x) for x in row.values), axis=1)
 
 # Precompute embeddingów dla opisów w danych
@@ -72,7 +78,7 @@ def recommend(query: str, show_all: bool = Query(False, description="Czy wyświe
 @app.get("/search")
 def search(query: str):
     """
-    Endpoint do wyszukiwania po różnych polach, takich jak uprawa, choroby, zastosowanie,
+    Endpoint do wyszukiwania po różnych polach, takich jak uprawa, agrofag, zastosowanie,
     nazwy środków oraz substancje czynne.
     """
     if df is None:
@@ -82,7 +88,7 @@ def search(query: str):
         search_results = []
         
         for idx, row in df.iterrows():
-            fields = ['uprawa', 'choroby', 'zastosowanie', 'nazwa_srodka', 'substancje_czynne']
+            fields = ['uprawa', 'agrofag', 'zastosowanie/uzytkownik', 'nazwa', 'Substancja_czynna']
             for field in fields:
                 if field in row:
                     field_vector = model.encode(str(row[field]), convert_to_tensor=True)
@@ -98,3 +104,8 @@ def search(query: str):
         return {"search_results": [{"field": field, "similarity": sim, "data": data} for field, sim, data in filtered_results]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
