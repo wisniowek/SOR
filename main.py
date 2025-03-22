@@ -76,13 +76,19 @@ def read_root():
     return {"message": "Witaj w API SOR z wyszukiwarką AI!"}
 
 @app.get("/recommend")
-def recommend(query: str, show_all: bool = Query(False, description="Czy wyświetlić wszystkie wyniki, jeśli jest ich więcej niż 5")):
+def recommend(query: str = Query(None), problem: str = Query(None), uprawa: str = Query(None), show_all: bool = Query(False, description="Czy wyświetlić wszystkie wyniki, jeśli jest ich więcej niż 5")):
     """
-    Endpoint przyjmujący zapytanie w parametrze 'query'.
+    Endpoint przyjmujący zapytanie w parametrze 'query', 'problem' i 'uprawa'.
     Używa modelu SentenceTransformer do generowania wektora zapytania.
     Następnie oblicza kosinusowe podobieństwo pomiędzy zapytaniem a opisami i zwraca
     top 5 wyników o podobieństwie równym lub większym niż 0.5.
     """
+    if query is None:
+        query_parts = filter(None, [problem, uprawa])
+        query = " ".join(query_parts)
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter is required")
+
     if df is None:
         raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane")
     try:
