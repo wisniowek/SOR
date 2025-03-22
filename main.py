@@ -22,7 +22,7 @@ def load_excel():
     return df
 
 # Inicjalizacja modelu i danych
-model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+model = SentenceTransformer("sentence-transformers/paraphrase-MiniLM-L6-v2")
 
 try:
     df = load_excel()
