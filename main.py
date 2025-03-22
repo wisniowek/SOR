@@ -1,61 +1,67 @@
 from fastapi import FastAPI, HTTPException, Query
-from sentence_transformers import SentenceTransformer, util
-import pandas as pd
+from typing import List
 from pathlib import Path
+import pandas as pd
+from sentence_transformers import SentenceTransformer, util
 
 app = FastAPI()
+
+print("🔥 STARTUJE APLIKACJA NA RENDER 🔥")
 
 # Ścieżka do pliku Excel
 EXCEL_PATH = Path(__file__).parent / "Rejestr_zastosowanie.xlsx"
 
-# Model AI do podobieństw tekstu
-model = SentenceTransformer("paraphrase-MiniLM-L6-v2")
-
-# Funkcja do wczytania danych
+# Funkcja do ładowania danych z Excela
 def load_excel():
-    if not EXCEL_PATH.exists():
-        raise FileNotFoundError(f"Brak pliku: {EXCEL_PATH}")
-    
-    # Wczytaj dane z arkusza
+    print("📥 Próba wczytania Excela...")
+    print("📁 Szukam pliku:", EXCEL_PATH)
+
     df = pd.read_excel(EXCEL_PATH, sheet_name="Rejestr_zastosowanie")
-
-    # Połącz wszystkie kolumny w jedną kolumnę 'opis' jako tekst
-    df["opis"] = df.astype(str).agg(" ".join, axis=1)
-
-    # Zakoduj każdy opis do wektora
-    df["vector"] = df["opis"].apply(lambda x: model.encode(x, convert_to_tensor=True))
-
+    df = df.dropna(subset=["nazwa", "uprawa"])
+    df["tekst"] = df["nazwa"].astype(str) + " " + df["uprawa"].astype(str)
     return df
 
-# Wczytaj dane na start
+# Inicjalizacja modelu i danych
+model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+
 try:
     df = load_excel()
-    print("✅ Dane z Excela i model AI zostały załadowane")
+    print("✅ Dane z Excela załadowane:", len(df), "wierszy")
+    teksty = df["tekst"].tolist()
+    embeddings = model.encode(teksty, convert_to_tensor=True)
 except Exception as e:
     df = None
-    print(f"❌ Błąd przy ładowaniu danych: {e}")
+    embeddings = None
+    print("❌ Błąd ładowania danych:", e)
 
-# Endpoint testowy
 @app.get("/")
 def root():
     return {"message": "Witaj w API SOR z wyszukiwarką AI!"}
 
-# Endpoint rekomendacji
 @app.get("/recommend")
-def recommend(query: str = Query(...), show_all: bool = False):
-    if df is None:
-        raise HTTPException(500, "Dane z Excela nie zostały wczytane")
+def recommend(query: str = Query(...), top_k: int = 5, show_all: bool = False):
+    if df is None or embeddings is None:
+        raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane")
 
-    # Wektor zapytania użytkownika
-    q_vec = model.encode(query, convert_to_tensor=True)
+    query_embedding = model.encode(query, convert_to_tensor=True)
+    similarities = util.pytorch_cos_sim(query_embedding, embeddings)[0]
 
-    # Oblicz podobieństwo kosinusowe między zapytaniem a każdym opisem
-    df["similarity"] = df["vector"].apply(lambda v: util.pytorch_cos_sim(q_vec, v).item())
+    results = []
+    for idx in similarities.argsort(descending=True):
+        score = similarities[idx].item()
+        row = df.iloc[idx]
+        results.append({
+            "nazwa": row["nazwa"],
+            "uprawa": row["uprawa"],
+            "zalecane_substancje": row.get("zalecane_substancje", ""),
+            "substancje_czynne": row.get("substancje_czynne", ""),
+            "substancje_biologiczne": row.get("substancje_biologiczne", ""),
+            "grupa": row.get("grupa", ""),
+            "odstepstwo": row.get("odstepstwo", ""),
+            "similarity": round(score, 4)
+        })
 
-    # Filtrowanie wyników z similarity > 0.5
-    result = df[df["similarity"] > 0.5].sort_values("similarity", ascending=False)
+    if not show_all:
+        results = results[:top_k]
 
-    # Konwertuj do listy słowników
-    output = result.to_dict(orient="records")
-
-    return {"recommendations": output if show_all else output[:5]}
+    return {"recommendations": results}
