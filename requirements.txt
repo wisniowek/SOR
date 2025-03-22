@@ -1,5 +1,5 @@
 fastapi
-uvicorn
 pandas
-openpyxl
+requests
 sentence-transformers
+uvicorn
