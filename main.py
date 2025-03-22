@@ -1,37 +1,38 @@
-from fastapi import FastAPI
-from pathlib import Path
+from fastapi import FastAPI, HTTPException
 import pandas as pd
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, util
 
+# 🔥 TEST 3 – MODEL + EXCEL 🔥
+print("📁 Ścieżka do pliku Excel: /opt/render/project/src/Rejestr_zastosowanie.xlsx")
+print("📥 Wczytywanie Excela...")
+excel_path = "Rejestr_zastosowanie.xlsx"
+df = pd.read_excel(excel_path, sheet_name="Rejestr_zastosowanie")
+df.columns = df.columns.str.strip()
+print(f"✅ Wczytano Excel – liczba wierszy: {len(df)}")
+
+# Model AI
+print("🧠 Wczytywanie modelu AI...")
+model = SentenceTransformer("sentence-transformers/paraphrase-MiniLM-L6-v2")
+print("✅ Model załadowany")
+
+# Teksty do porównania
+texts = df["nazwa"].astype(str).tolist()
+embeddings = model.encode(texts, convert_to_tensor=True)
+
+# FastAPI
 app = FastAPI()
 
-print("🔥 TEST 3 – MODEL + EXCEL 🔥")
-
-EXCEL_PATH = Path(__file__).parent / "Rejestr_zastosowanie.xlsx"
-print("📁 Ścieżka do pliku Excel:", EXCEL_PATH)
-
-def load_excel():
-    print("📥 Wczytywanie Excela...")
-    if not EXCEL_PATH.exists():
-        raise FileNotFoundError(f"Plik nie istnieje: {EXCEL_PATH}")
-    df = pd.read_excel(EXCEL_PATH, sheet_name="Rejestr_zastosowanie")
-    print("✅ Wczytano Excel – liczba wierszy:", len(df))
-    return df
-
-try:
-    df = load_excel()
-except Exception as e:
-    print("❌ Błąd ładowania Excela:", e)
-    df = None
-
-try:
-    print("🧠 Wczytywanie modelu AI...")
-    model = SentenceTransformer("sentence-transformers/paraphrase-MiniLM-L6-v2")
-    print("✅ Model załadowany")
-except Exception as e:
-    print("❌ Błąd ładowania modelu:", e)
-    model = None
-
 @app.get("/")
-def root():
-    return {"excel_rows": len(df) if df is not None else 0, "model_loaded": model is not None}
+def read_root():
+    return {"message": "Witaj w API SOR z wyszukiwarką AI!"}
+
+@app.get("/recommend")
+def recommend(query: str):
+    if not query:
+        raise HTTPException(status_code=400, detail="Brak zapytania")
+
+    query_embedding = model.encode(query, convert_to_tensor=True)
+    hits = util.semantic_search(query_embedding, embeddings, top_k=5)[0]
+
+    results = [texts[hit["corpus_id"]] for hit in hits]
+    return {"query": query, "results": results}
