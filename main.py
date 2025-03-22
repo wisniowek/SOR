@@ -1,5 +1,4 @@
 import os
-
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from sentence_transformers import SentenceTransformer, util
@@ -10,12 +9,37 @@ app = FastAPI()
 # Ścieżka do pliku Excel
 EXCEL_FILE_PATH = Path(__file__).parent / "Rejestr_zastosowanie.xlsx"
 
+# Mapowanie nazw kolumn
+COLUMN_MAPPING = {
+    "nazwa": "Nazwa",
+    "NrZezw": "Numer zezwolenia",
+    "TerminZezw": "Termin zezwolenia",
+    "TerminDoSprzedazy": "Termin do sprzedaży",
+    "TerminDoStosowania": "Termin do stosowania",
+    "Rodzaj": "Rodzaj",
+    "Substancja_czynna": "Substancja czynna",
+    "uprawa": "Uprawa",
+    "agrofag": "Agrofag",
+    "dawka": "Dawka",
+    "termin": "Termin",
+    "nazwa_grupy": "Nazwa grupy",
+    "maloobszarowe": "Użytek małoobszarowy",
+    "zastosowanie/uzytkownik": "Zastosowanie",
+    "srodek_mikrobiologiczny": "Środek mikrobiologiczny"
+}
+
 def load_excel_data():
+    print(f"Checking if the Excel file exists at {EXCEL_FILE_PATH}")
+    if not EXCEL_FILE_PATH.exists():
+        print(f"File not found: {EXCEL_FILE_PATH}")
+        raise Exception(f"Plik Excel nie został znaleziony: {EXCEL_FILE_PATH}")
+    
     try:
         # Wczytanie danych z arkusza "Rejestr_zastosowanie"
         print(f"Loading Excel file from {EXCEL_FILE_PATH}")
         df = pd.read_excel(EXCEL_FILE_PATH, sheet_name="Rejestr_zastosowanie")
         print("Excel file loaded successfully")
+        print(f"Columns in the Excel file: {df.columns.tolist()}")
         return df
     except FileNotFoundError:
         print("Excel file not found")
@@ -30,6 +54,8 @@ def load_excel_data():
 # Wczytaj dane
 try:
     df = load_excel_data()
+    # Zmapuj nazwy kolumn na bardziej opisowe
+    df.rename(columns=COLUMN_MAPPING, inplace=True)
 except Exception as e:
     df = None
     print(f"Błąd podczas ładowania Excela: {e}")
@@ -78,6 +104,7 @@ def recommend(query: str, show_all: bool = Query(False, description="Czy wyświe
         
         return {"recommendations": [{"similarity": sim, "data": data} for sim, data in filtered]}
     except Exception as e:
+        print(f"Error in /recommend endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/search")
@@ -93,7 +120,7 @@ def search(query: str):
         search_results = []
         
         for idx, row in df.iterrows():
-            fields = ['uprawa', 'agrofag', 'zastosowanie/uzytkownik', 'nazwa', 'Substancja_czynna']
+            fields = ['Uprawa', 'Agrofag', 'Zastosowanie', 'Nazwa', 'Substancja czynna']
             for field in fields:
                 if field in row:
                     field_vector = model.encode(str(row[field]), convert_to_tensor=True)
@@ -108,6 +135,7 @@ def search(query: str):
         
         return {"search_results": [{"field": field, "similarity": sim, "data": data} for field, sim, data in filtered_results]}
     except Exception as e:
+        print(f"Error in /search endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
