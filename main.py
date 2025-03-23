@@ -5,14 +5,14 @@ import pandas as pd
 
 app = FastAPI()
 
-# Ścieżka do pliku Excel (w tym samym katalogu co main.py)
+# Ścieżka do pliku Excel
 excel_path = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
 
-# Wczytanie Excela
-print("🔥 Start – proste wyszukiwanie (bez AI)")
+print("🔥 Start – proste wyszukiwanie (bez AI), z konwersją dat w JSON")
 print("📁 Ścieżka do pliku Excel:", excel_path)
 
 try:
+    # Wczytanie Excela
     df = pd.read_excel(excel_path, sheet_name="Rejestr_zastosowanie")
     df.columns = df.columns.str.strip()
     print(f"✅ Wczytano Excel: {len(df)} wierszy, kolumny: {df.columns.tolist()}")
@@ -23,8 +23,7 @@ except Exception as e:
 @app.get("/")
 def home():
     """
-    Strona główna API. 
-    Wymuszamy media_type, by polskie znaki (ą, ś, ć, ź, ż) wyświetlały się poprawnie.
+    Strona główna API
     """
     if df is None:
         content = {"message": "Brak danych Excel. Sprawdź logi."}
@@ -33,20 +32,26 @@ def home():
     return JSONResponse(content=content, media_type="application/json; charset=utf-8")
 
 @app.get("/search")
-def search(q: str = Query(..., description="np. ziemniaki, truskawki, pszenica...")):
+def search(q: str = Query(..., description="np. ziemniak, pszenica, rzepak...")):
     """
-    Proste wyszukiwanie w kolumnach 'nazwa' i 'uprawa' (bez AI).
-    case-insensitive substring match.
+    Proste wyszukiwanie w kolumnach 'nazwa' i 'uprawa'.
+    - Używamy substring match (case-insensitive).
+    - Konwertujemy daty w DataFrame do formatu ISO, aby uniknąć błędów serializacji.
     """
     if df is None:
-        raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane.")
+        raise HTTPException(
+            status_code=500,
+            detail="Dane z Excela nie zostały wczytane."
+        )
 
-    # Filtr po 'nazwa' OR 'uprawa', ignorujemy wielkość liter
+    # Filtr po 'nazwa' OR 'uprawa' (ignorujemy wielkość liter)
     mask_nazwa = df["nazwa"].str.contains(q, case=False, na=False)
     mask_uprawa = df["uprawa"].str.contains(q, case=False, na=False)
 
     results = df[mask_nazwa | mask_uprawa].copy()
-    data_list = results.to_dict(orient="records")
+
+    # UWAGA: używamy date_format="iso", by Timestamps były JSON-serializable
+    data_list = results.to_dict(orient="records", date_format="iso")
 
     content = {
         "zapytanie": q,
