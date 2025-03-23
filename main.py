@@ -8,7 +8,7 @@ app = FastAPI()
 
 excel_path = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
 
-print("🔥 Start – proste wyszukiwanie, konwersja dat i Infinity -> None")
+print("🔥 Start – proste wyszukiwanie (bez AI), wymuszamy stringi by uniknąć 'out of range float'")
 print("📁 Ścieżka do pliku Excel:", excel_path)
 
 try:
@@ -32,21 +32,19 @@ def search(q: str = Query(..., description="np. ziemniak, pszenica...")):
     if df is None:
         raise HTTPException(500, "Dane z Excela nie zostały wczytane.")
 
+    # Filtr
     mask_nazwa = df["nazwa"].str.contains(q, case=False, na=False)
     mask_uprawa = df["uprawa"].str.contains(q, case=False, na=False)
     results = df[mask_nazwa | mask_uprawa].copy()
 
-    # 1) Konwersja dat → string
-    for col in results.columns:
-        if pd.api.types.is_datetime64_any_dtype(results[col]):
-            results[col] = results[col].apply(lambda x: x.isoformat() if pd.notnull(x) else None)
+    # 1) Zamień wszystko na string
+    results = results.astype(str)
 
-    # 2) Zamień Infinity, -Infinity na NaN
-    results = results.replace([np.inf, -np.inf], np.nan)
+    # 2) Zamień w stringach "nan", "NaT" na None
+    #    bo "nan" to string, nie None w Pythonie.
+    results = results.replace("nan", None).replace("<NA>", None).replace("NaT", None)
 
-    # 3) Zamień NaN na None (dla JSON)
-    results = results.where(pd.notnull(results), None)
-
+    # 3) Teraz to_dict jest bezpieczne – same stringi/None
     data_list = results.to_dict(orient="records")
 
     content = {
