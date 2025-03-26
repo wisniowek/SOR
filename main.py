@@ -1,13 +1,24 @@
 # -*- coding: utf-8 -*-
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-from typing import Optional
-import pandas as pd
-import numpy as np
 import os
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 app = FastAPI()
+
+# Dodanie CORS (umożliwia wywołania z innych domen)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # W produkcji lepiej podać konkretną domenę
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Ścieżka do pliku Excel (musi być w tym samym katalogu co main.py)
 EXCEL_PATH = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
@@ -33,7 +44,7 @@ COLUMN_MAPPING = {
     "NrZezw": "Numer zezwolenia",
     "TerminZezw": "Termin zezwolenia",
     "TerminDoSprzedazy": "Termin dopuszczenia do sprzedaży",
-    "TerminDoStosowania": "Termin dopuszczenia do sprzedaży",
+    "TerminDoStosowania": "Termin dopuszczenia do sprzedaży",  # Uwaga: ta sama wartość co TerminDoSprzedazy
     "Rodzaj": "Rodzaj",
     "Substancja_czynna": "Substancja czynna",
     "uprawa": "Uprawa",
@@ -42,17 +53,17 @@ COLUMN_MAPPING = {
     "termin": "Termin stosowania",
 }
 
+# Wczytanie pliku Excel i przygotowanie DataFrame
 try:
-    # 1) Wczytanie pliku
     df = pd.read_excel(EXCEL_PATH, sheet_name="Rejestr_zastosowanie")
-    # 2) Usuwamy spacje w nagłówkach
+    # Usuwamy spacje w nagłówkach
     df.columns = df.columns.str.strip()
 
-    # 3) Sprawdź duplikaty
+    # Sprawdź duplikaty kolumn
     dup_cols = df.columns[df.columns.duplicated()].unique()
     if len(dup_cols) > 0:
         print("⚠️ Wykryto duplikaty kolumn:", dup_cols)
-        # Usuwamy powtórki (zostanie pierwsza kolumna o danej nazwie)
+        # Usuwamy powtórki – zostaje pierwsza kolumna o danej nazwie
         df = df.loc[:, ~df.columns.duplicated()]
 
     print("✅ Wczytano Excel – liczba wierszy:", len(df), ", kolumny:", df.columns.tolist())
@@ -60,16 +71,47 @@ except Exception as e:
     print("❌ Błąd wczytywania Excela:", e)
     df = None
 
+@app.head("/")
+def head_home():
+    """
+    Obsługa metody HEAD na '/' – aby uniknąć błędu 405 Method Not Allowed.
+    """
+    return None
+
 @app.get("/")
 def home():
     """
-    Strona główna – proste info, czy dane wczytane.
+    Strona główna – informuje, czy dane zostały poprawnie wczytane.
     """
     if df is None:
         content = {"message": "Brak danych Excel. Sprawdź logi."}
     else:
         content = {"message": "API SOR działa – filtry (ręczne parametry), polskie znaki (ą, ś, ć, ź, ż)"}
     return JSONResponse(content=content, media_type="application/json; charset=utf-8")
+
+@app.get("/distinct")
+def get_distinct_values(col: str = Query(..., description="Nazwa kolumny, z której chcesz uzyskać unikalne wartości")):
+    """
+    Endpoint zwraca unikalne wartości z podanej kolumny.
+    Przykład: GET /distinct?col=uprawa
+    """
+    if df is None:
+        raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane.")
+
+    # Upewnij się, że podana kolumna istnieje w DataFrame
+    if col not in df.columns:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Kolumna '{col}' nie występuje. Dostępne kolumny: {list(df.columns)}"
+        )
+
+    # Pobierz unikalne wartości, pomijając NaN
+    distinct_vals = df[col].drop_duplicates().dropna().tolist()
+
+    return JSONResponse(
+        content={"column": col, "distinct_values": distinct_vals},
+        media_type="application/json; charset=utf-8"
+    )
 
 @app.get("/search-all")
 def search_all(
@@ -99,15 +141,15 @@ def search_all(
       - dawka
       - termin
 
-    Jeśli parametr jest podany, filtrujemy .str.contains(...).
-    Jeśli nie – pomijamy filtr dla tej kolumny.
+    Jeśli parametr jest podany, stosowane jest filtrowanie metodą .str.contains(...)
+    (bez uwzględnienia wielkości liter i z pominięciem wartości NaN).
     """
     if df is None:
         raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane.")
 
     results = df.copy()
 
-    # Filtry – każdy parametr jest sprawdzany
+    # Każdy parametr jest sprawdzany i stosowany jako filtr, jeśli został podany
     if nazwa:
         results = results[results["nazwa"].str.contains(nazwa, case=False, na=False)]
     if NrZezw:
@@ -131,16 +173,16 @@ def search_all(
     if termin:
         results = results[results["termin"].str.contains(termin, case=False, na=False)]
 
-    # Zostawiamy tylko kolumny dozwolone
+    # Zostawiamy tylko dozwolone kolumny
     results = results[KEEP_COLS]
 
-    # Zmieniamy nazwy kolumn (np. "nazwa" -> "Nazwa", "Rodzaj" -> "Rodzaj")
+    # Zmieniamy nazwy kolumn zgodnie z mapowaniem
     results = results.rename(columns=COLUMN_MAPPING)
 
-    # Konwertuj do string, usuń "nan", "NaT" → None
+    # Konwertujemy wartości do string, zastępujemy "nan" i "NaT" na None
     results = results.astype(str).replace("nan", None).replace("NaT", None)
 
-    # Zamiana na listę słowników
+    # Zamieniamy DataFrame na listę słowników
     data_list = results.to_dict(orient="records")
 
     return JSONResponse(
