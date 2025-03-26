@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Prosta wyszukiwarka SOR</title>
+
+  <!-- Prosty styl, żeby nieco upiększyć -->
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+      max-width: 800px;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    input[list] {
+      width: 300px;
+      padding: 6px;
+    }
+    button {
+      margin-top: 20px;
+      padding: 8px 16px;
+      cursor: pointer;
+    }
+    table {
+      border-collapse: collapse;
+      margin-top: 20px;
+      width: 100%;
+    }
+    table th, table td {
+      border: 1px solid #ccc;
+      padding: 6px;
+      text-align: left;
+    }
+    #results {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Prosta wyszukiwarka SOR</h1>
+
+  <p>Wpisz fragment w jednym lub kilku polach. Podczas wpisywania dostaniesz podpowiedzi (datalist). Pole możesz też zostawić puste.</p>
+
+  <!-- Pole: Uprawa -->
+  <label for="uprawaInput">Uprawa:</label>
+  <input type="text" id="uprawaInput" list="uprawaList" oninput="filterDatalist('uprawa')" placeholder="np. ziemniak" />
+  <datalist id="uprawaList"></datalist>
+
+  <!-- Pole: Agrofag -->
+  <label for="agrofagInput">Agrofag:</label>
+  <input type="text" id="agrofagInput" list="agrofagList" oninput="filterDatalist('agrofag')" placeholder="np. stonka ziemniaczana" />
+  <datalist id="agrofagList"></datalist>
+
+  <!-- Pole: Nazwa -->
+  <label for="nazwaInput">Nazwa środka:</label>
+  <input type="text" id="nazwaInput" list="nazwaList" oninput="filterDatalist('nazwa')" placeholder="np. Aceplan" />
+  <datalist id="nazwaList"></datalist>
+
+  <!-- Pole: Substancja czynna -->
+  <label for="subInput">Substancja czynna:</label>
+  <input type="text" id="subInput" list="subList" oninput="filterDatalist('sub')" placeholder="np. acetamipryd" />
+  <datalist id="subList"></datalist>
+
+  <!-- Przycisk -->
+  <button onclick="wyszukaj()">Wyszukaj</button>
+
+  <div id="results"></div>
+
+  <script>
+    // USTAW: Adres Twojego API (bez slash na końcu)
+    const API_BASE = "https://sor.onrender.com";
+
+    // Przechowujemy listy do autouzupełniania
+    let uprawaValues = [];
+    let agrofagValues = [];
+    let nazwaValues = [];
+    let subValues = [];
+
+    // 1. Przy starcie strony pobierz distincty
+    window.addEventListener('DOMContentLoaded', async () => {
+      await initDatalists();
+    });
+
+    async function initDatalists() {
+      try {
+        // Zakładamy, że istnieją endpointy: /distinct?col=uprawa itp.
+        const uprawaData = await fetch(`${API_BASE}/distinct?col=uprawa`).then(res => res.json());
+        const agrofagData = await fetch(`${API_BASE}/distinct?col=agrofag`).then(res => res.json());
+        const nazwaData = await fetch(`${API_BASE}/distinct?col=nazwa`).then(res => res.json());
+        const subData = await fetch(`${API_BASE}/distinct?col=Substancja_czynna`).then(res => res.json());
+
+        uprawaValues = uprawaData.values || [];
+        agrofagValues = agrofagData.values || [];
+        nazwaValues = nazwaData.values || [];
+        subValues = subData.values || [];
+
+        // Na początek wypełniamy listy w <datalist> bez filtrowania
+        fillDatalist('uprawaList', uprawaValues);
+        fillDatalist('agrofagList', agrofagValues);
+        fillDatalist('nazwaList', nazwaValues);
+        fillDatalist('subList', subValues);
+
+      } catch(err) {
+        console.error("Błąd initDatalists:", err);
+      }
+    }
+
+    // Funkcja wypełnia <datalist> danymi
+    function fillDatalist(datalistId, arr) {
+      const datalistEl = document.getElementById(datalistId);
+      if (!datalistEl) return;
+      datalistEl.innerHTML = ""; // wyczyszczenie
+      arr.forEach(val => {
+        const opt = document.createElement("option");
+        opt.value = val;
+        datalistEl.appendChild(opt);
+      });
+    }
+
+    // Podczas wpisywania w input – filtruj wartości (client side)
+    // i zapełniaj <datalist>
+    function filterDatalist(field) {
+      let inputValue = "";
+      let sourceArr = [];
+      let datalistId = "";
+
+      if (field === 'uprawa') {
+        inputValue = document.getElementById("uprawaInput").value.toLowerCase();
+        sourceArr = uprawaValues;
+        datalistId = "uprawaList";
+      } else if (field === 'agrofag') {
+        inputValue = document.getElementById("agrofagInput").value.toLowerCase();
+        sourceArr = agrofagValues;
+        datalistId = "agrofagList";
+      } else if (field === 'nazwa') {
+        inputValue = document.getElementById("nazwaInput").value.toLowerCase();
+        sourceArr = nazwaValues;
+        datalistId = "nazwaList";
+      } else if (field === 'sub') {
+        inputValue = document.getElementById("subInput").value.toLowerCase();
+        sourceArr = subValues;
+        datalistId = "subList";
+      }
+
+      // Filtruj tablicę
+      const filtered = sourceArr.filter(val => val.toLowerCase().includes(inputValue));
+      fillDatalist(datalistId, filtered);
+    }
+
+    // Funkcja wyszukująca
+    async function wyszukaj() {
+      // Pobierz wartości
+      const uprawa = document.getElementById("uprawaInput").value.trim();
+      const agrofag = document.getElementById("agrofagInput").value.trim();
+      const nazwa = document.getElementById("nazwaInput").value.trim();
+      const sub = document.getElementById("subInput").value.trim();
+
+      // Zbuduj query string do /search-all
+      // TYLKO jeśli user coś wpisał
+      let qs = [];
+      if (uprawa) qs.push(`uprawa=${encodeURIComponent(uprawa)}`);
+      if (agrofag) qs.push(`agrofag=${encodeURIComponent(agrofag)}`);
+      if (nazwa) qs.push(`nazwa=${encodeURIComponent(nazwa)}`);
+      if (sub) qs.push(`Substancja_czynna=${encodeURIComponent(sub)}`);
+
+      let url = `${API_BASE}/search-all`;
+      if (qs.length > 0) {
+        url += "?" + qs.join("&");
+      }
+
+      // Wyślij żądanie
+      console.log("Wywołuję:", url);
+      try {
+        const response = await fetch(url);
+        const json = await response.json();
+        wyswietlWyniki(json);
+      } catch (err) {
+        console.error("Błąd fetch:", err);
+        document.getElementById("results").innerHTML = `<p style="color:red;">Błąd podczas wyszukiwania</p>`;
+      }
+    }
+
+    // Funkcja wyświetlająca wyniki w tabeli
+    function wyswietlWyniki(data) {
+      const resultsDiv = document.getElementById("results");
+      resultsDiv.innerHTML = ""; // wyczyszczenie
+
+      if (!data.results || data.results.length === 0) {
+        resultsDiv.innerHTML = `<p>Brak wyników (0)</p>`;
+        return;
+      }
+
+      // Tworzymy tabelę
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const tbody = document.createElement("tbody");
+
+      // Nagłówki z kluczy pierwszego rekordu
+      const cols = Object.keys(data.results[0]); // np. ["Nazwa", "Numer zezwolenia", ...]
+      const trHead = document.createElement("tr");
+      cols.forEach(col => {
+        const th = document.createElement("th");
+        th.textContent = col; // np. "Nazwa"
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+
+      // Wiersze
+      data.results.forEach(rec => {
+        const tr = document.createElement("tr");
+        cols.forEach(col => {
+          const td = document.createElement("td");
+          td.textContent = rec[col] || "";
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(thead);
+      table.appendChild(tbody);
+
+      // info o liczbie
+      const infoP = document.createElement("p");
+      infoP.textContent = `Znaleziono rekordów: ${data.count}`;
+
+      resultsDiv.appendChild(infoP);
+      resultsDiv.appendChild(table);
+    }
+  </script>
+</body>
+</html>
