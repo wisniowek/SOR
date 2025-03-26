@@ -1,20 +1,52 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
-import os
+from typing import Optional
 import pandas as pd
 import numpy as np
+import os
 
 app = FastAPI()
 
-excel_path = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
+# Ścieżka do pliku Excel (musi być w tym samym katalogu co main.py)
+EXCEL_PATH = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
 
-print("🔥 Start – proste wyszukiwanie (bez AI), wymuszamy stringi by uniknąć 'out of range float'")
-print("📁 Ścieżka do pliku Excel:", excel_path)
+# Kolumny, które chcemy w wyniku
+KEEP_COLS = [
+    "nazwa",
+    "NrZezw",
+    "TerminZezw",
+    "TerminDoSprzedazy",
+    "TerminDoStosowania",
+    "Rodzaj",
+    "Substancja_czynna",
+    "uprawa",
+    "agrofag",
+    "dawka",
+    "termin",
+    # kolumn takich jak: nazwa_grupy, maloobszarowe, zastosowanie/uzytkownik,
+    # srodek_mikrobiologiczny nie wymieniamy, bo NIE ŁADUJ
+]
 
+# Mapowanie nazw kolumn (stara_nazwa -> docelowa_nazwa)
+COLUMN_MAPPING = {
+    "nazwa": "Nazwa",
+    "NrZezw": "Numer zezwolenia",
+    "TerminZezw": "Termin zezwolenia",
+    "TerminDoSprzedazy": "Termin dopuszczenia do sprzedaży",
+    "TerminDoStosowania": "Termin dopuszczenia do sprzedaży",
+    "Rodzaj": "Rodzaj",
+    "Substancja_czynna": "Substancja czynna",
+    "uprawa": "Uprawa",
+    "agrofag": "Agrofag",
+    "dawka": "Dawka",
+    "termin": "Termin stosowania",
+}
+
+# Próbujemy wczytać plik Excel
 try:
-    df = pd.read_excel(excel_path, sheet_name="Rejestr_zastosowanie")
-    df.columns = df.columns.str.strip()
-    print(f"✅ Wczytano Excel: {len(df)} wierszy, kolumny: {df.columns.tolist()}")
+    df = pd.read_excel(EXCEL_PATH, sheet_name="Rejestr_zastosowanie")
+    df.columns = df.columns.str.strip()  # usuń ewentualne spacje w nagłówkach
+    print("✅ Wczytano Excel – liczba wierszy:", len(df))
 except Exception as e:
     print("❌ Błąd wczytywania Excela:", e)
     df = None
@@ -22,34 +54,44 @@ except Exception as e:
 @app.get("/")
 def home():
     if df is None:
-        content = {"message": "Brak danych Excel. Sprawdź logi."}
-    else:
-        content = {"message": "API SOR – proste wyszukiwanie (ą, ś, ć, ź, ż)"}
-    return JSONResponse(content=content, media_type="application/json; charset=utf-8")
+        return {"message": "Brak danych Excel. Sprawdź logi."}
+    return {"message": "API SOR działa – filtry (ręczne parametry) + zmiana nazw kolumn"}
 
-@app.get("/search")
-def search(q: str = Query(..., description="np. ziemniak, pszenica...")):
+@app.get("/search-all")
+def search_all(
+    # Każdy parametr jest Optional – użytkownik może podać lub pominąć
+    nazwa: Optional[str] = None,
+    NrZezw: Optional[str] = None,
+    TerminZezw: Optional[str] = None,
+    TerminDoSprzedazy: Optional[str] = None,
+    TerminDoStosowania: Optional[str] = None,
+    Rodzaj: Optional[str] = None,
+    Substancja_czynna: Optional[str] = None,
+    uprawa: Optional[str] = None,
+    agrofag: Optional[str] = None,
+    dawka: Optional[str] = None,
+    termin: Optional[str] = None
+):
+    """
+    Filtrowanie po dowolnej z tych kolumn:
+    - nazwa
+    - NrZezw
+    - TerminZezw
+    - TerminDoSprzedazy
+    - TerminDoStosowania
+    - Rodzaj
+    - Substancja_czynna
+    - uprawa
+    - agrofag
+    - dawka
+    - termin
+
+    Jeśli użytkownik nie poda parametru, nie filtrujemy po tej kolumnie.
+    """
+
     if df is None:
         raise HTTPException(500, "Dane z Excela nie zostały wczytane.")
 
-    # Filtr
-    mask_nazwa = df["nazwa"].str.contains(q, case=False, na=False)
-    mask_uprawa = df["uprawa"].str.contains(q, case=False, na=False)
-    results = df[mask_nazwa | mask_uprawa].copy()
+    results = df.copy()
 
-    # 1) Zamień wszystko na string
-    results = results.astype(str)
-
-    # 2) Zamień w stringach "nan", "NaT" na None
-    #    bo "nan" to string, nie None w Pythonie.
-    results = results.replace("nan", None).replace("<NA>", None).replace("NaT", None)
-
-    # 3) Teraz to_dict jest bezpieczne – same stringi/None
-    data_list = results.to_dict(orient="records")
-
-    content = {
-        "zapytanie": q,
-        "liczba_wynikow": len(data_list),
-        "wyniki": data_list
-    }
-    return JSONResponse(content=content, media_type="application/json; charset=utf-8")
+    # Filtry – każdy parametr jest
