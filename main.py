@@ -12,7 +12,7 @@ app = FastAPI()
 # Ścieżka do pliku Excel (musi być w tym samym katalogu co main.py)
 EXCEL_PATH = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
 
-# Kolumny, które chcemy w wyniku (pomijamy te z "NIE ŁADUJ")
+# Kolumny, które chcesz w wyniku (pomijamy te z "NIE ŁADUJ")
 KEEP_COLS = [
     "nazwa",
     "NrZezw",
@@ -27,7 +27,7 @@ KEEP_COLS = [
     "termin",
 ]
 
-# Mapa: nazwy kolumn (stare) → docelowe nazwy w JSON
+# Mapa: nazwy kolumn -> docelowe nazwy w JSON
 COLUMN_MAPPING = {
     "nazwa": "Nazwa",
     "NrZezw": "Numer zezwolenia",
@@ -42,11 +42,20 @@ COLUMN_MAPPING = {
     "termin": "Termin stosowania",
 }
 
-# Wczytanie Excela
 try:
+    # 1) Wczytanie pliku
     df = pd.read_excel(EXCEL_PATH, sheet_name="Rejestr_zastosowanie")
-    df.columns = df.columns.str.strip()  # usuń spacje w nagłówkach
-    print("✅ Wczytano Excel – liczba wierszy:", len(df))
+    # 2) Usuwamy spacje w nagłówkach
+    df.columns = df.columns.str.strip()
+
+    # 3) Sprawdź duplikaty
+    dup_cols = df.columns[df.columns.duplicated()].unique()
+    if len(dup_cols) > 0:
+        print("⚠️ Wykryto duplikaty kolumn:", dup_cols)
+        # Usuwamy powtórki (zostanie pierwsza kolumna o danej nazwie)
+        df = df.loc[:, ~df.columns.duplicated()]
+
+    print("✅ Wczytano Excel – liczba wierszy:", len(df), ", kolumny:", df.columns.tolist())
 except Exception as e:
     print("❌ Błąd wczytywania Excela:", e)
     df = None
@@ -54,7 +63,7 @@ except Exception as e:
 @app.get("/")
 def home():
     """
-    Strona główna – sprawdź, czy działa i czy polskie znaki są wyświetlane prawidłowo (ą, ś, ć, ź, ż).
+    Strona główna – proste info, czy dane wczytane.
     """
     if df is None:
         content = {"message": "Brak danych Excel. Sprawdź logi."}
@@ -78,27 +87,27 @@ def search_all(
 ):
     """
     Filtrowanie w kolumnach:
-    - nazwa
-    - NrZezw
-    - TerminZezw
-    - TerminDoSprzedazy
-    - TerminDoStosowania
-    - Rodzaj
-    - Substancja_czynna
-    - uprawa
-    - agrofag
-    - dawka
-    - termin
+      - nazwa
+      - NrZezw
+      - TerminZezw
+      - TerminDoSprzedazy
+      - TerminDoStosowania
+      - Rodzaj
+      - Substancja_czynna
+      - uprawa
+      - agrofag
+      - dawka
+      - termin
 
-    Jeśli parametr jest podany – filtruje po .str.contains(...).
-    Jeśli nie jest podany – kolumna nie jest filtrowana.
+    Jeśli parametr jest podany, filtrujemy .str.contains(...).
+    Jeśli nie – pomijamy filtr dla tej kolumny.
     """
     if df is None:
         raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane.")
 
     results = df.copy()
 
-    # Filtruj tylko jeśli parametr nie jest None
+    # Filtry – każdy parametr jest sprawdzany
     if nazwa:
         results = results[results["nazwa"].str.contains(nazwa, case=False, na=False)]
     if NrZezw:
@@ -122,15 +131,16 @@ def search_all(
     if termin:
         results = results[results["termin"].str.contains(termin, case=False, na=False)]
 
-    # Zostaw tylko kolumny, które potrzebujesz
+    # Zostawiamy tylko kolumny dozwolone
     results = results[KEEP_COLS]
 
-    # Zmień nazwy kolumn na docelowe
+    # Zmieniamy nazwy kolumn (np. "nazwa" -> "Nazwa", "Rodzaj" -> "Rodzaj")
     results = results.rename(columns=COLUMN_MAPPING)
 
     # Konwertuj do string, usuń "nan", "NaT" → None
     results = results.astype(str).replace("nan", None).replace("NaT", None)
 
+    # Zamiana na listę słowników
     data_list = results.to_dict(orient="records")
 
     return JSONResponse(
