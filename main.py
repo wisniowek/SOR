@@ -22,7 +22,7 @@ app.add_middleware(
 )
 
 # Ustawienie klucza API OpenAI (upewnij się, że zmienna OPENAI_API_KEY jest ustawiona)
-openai.api_key = os.environ.get("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")
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 # Ścieżka do pliku Excel (musi być w tym samym katalogu co main.py)
 EXCEL_PATH = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
