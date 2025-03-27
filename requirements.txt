@@ -2,4 +2,4 @@ fastapi
 uvicorn
 pandas>=2.0.0
 openpyxl
-openai
+openai==0.28
