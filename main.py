@@ -5,6 +5,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+import openai
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,11 +15,14 @@ app = FastAPI()
 # Dodanie CORS (umożliwia wywołania z innych domen)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # W produkcji lepiej podać konkretną domenę
+    allow_origins=["*"],  # W produkcji warto ograniczyć do konkretnych domen
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Ustawienie klucza API OpenAI (upewnij się, że zmienna OPENAI_API_KEY jest ustawiona)
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 # Ścieżka do pliku Excel (musi być w tym samym katalogu co main.py)
 EXCEL_PATH = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
@@ -159,7 +163,7 @@ def search_all(
     if TerminDoSprzedazy:
         results = results[results["TerminDoSprzedazy"].astype(str).str.contains(TerminDoSprzedazy, case=False, na=False)]
     if TerminDoStosowania:
-        results = results[results["TerminDoStosowania"].astype(str).str.contains(TerminDoStosowania, case=False, na=False)]
+        results = results[results["TerminDoStosowania"].astype(str).str.contains(TerminDoSprzedazy, case=False, na=False)]
     if Rodzaj:
         results = results[results["Rodzaj"].str.contains(Rodzaj, case=False, na=False)]
     if Substancja_czynna:
@@ -189,3 +193,24 @@ def search_all(
         content={"count": len(data_list), "results": data_list},
         media_type="application/json; charset=utf-8"
     )
+
+@app.post("/estimate-price")
+async def estimate_price(item: dict):
+    """
+    Endpoint korzystający z OpenAI do oszacowania ceny na podstawie promptu.
+    Oczekuje JSON w formacie: { "prompt": "..." }
+    """
+    prompt = item.get("prompt")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Pole 'prompt' jest wymagane.")
+    try:
+        response = openai.Completion.create(
+            engine="text-davinci-003",
+            prompt=prompt,
+            max_tokens=50,
+            temperature=0.7
+        )
+        result_text = response.choices[0].text.strip()
+        return {"price_estimate": result_text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
