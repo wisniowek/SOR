@@ -102,14 +102,12 @@ def get_distinct_values(col: str = Query(..., description="Nazwa kolumny, z któ
     if df is None:
         raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane.")
 
-    # Upewnij się, że podana kolumna istnieje w DataFrame
     if col not in df.columns:
         raise HTTPException(
             status_code=404,
             detail=f"Kolumna '{col}' nie występuje. Dostępne kolumny: {list(df.columns)}"
         )
 
-    # Pobierz unikalne wartości, pomijając NaN
     distinct_vals = df[col].drop_duplicates().dropna().tolist()
 
     return JSONResponse(
@@ -132,28 +130,13 @@ def search_all(
     termin: Optional[str] = None
 ):
     """
-    Filtrowanie w kolumnach:
-      - nazwa
-      - NrZezw
-      - TerminZezw
-      - TerminDoSprzedazy
-      - TerminDoStosowania
-      - Rodzaj
-      - Substancja_czynna
-      - uprawa
-      - agrofag
-      - dawka
-      - termin
-
-    Jeśli parametr jest podany, stosowane jest filtrowanie metodą .str.contains(...)
+    Filtrowanie w kolumnach. Jeśli parametr jest podany, stosowane jest filtrowanie metodą .str.contains(...)
     (bez uwzględnienia wielkości liter i z pominięciem wartości NaN).
     """
     if df is None:
         raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane.")
 
     results = df.copy()
-
-    # Każdy parametr jest sprawdzany i stosowany jako filtr, jeśli został podany
     if nazwa:
         results = results[results["nazwa"].str.contains(nazwa, case=False, na=False)]
     if NrZezw:
@@ -177,16 +160,9 @@ def search_all(
     if termin:
         results = results[results["termin"].str.contains(termin, case=False, na=False)]
 
-    # Zostawiamy tylko dozwolone kolumny
     results = results[KEEP_COLS]
-
-    # Zmieniamy nazwy kolumn zgodnie z mapowaniem
     results = results.rename(columns=COLUMN_MAPPING)
-
-    # Konwertujemy wartości do string, zastępujemy "nan" i "NaT" na None
     results = results.astype(str).replace("nan", None).replace("NaT", None)
-
-    # Zamieniamy DataFrame na listę słowników
     data_list = results.to_dict(orient="records")
 
     return JSONResponse(
@@ -204,13 +180,17 @@ async def estimate_price(item: dict):
     if not prompt:
         raise HTTPException(status_code=400, detail="Pole 'prompt' jest wymagane.")
     try:
-        response = openai.Completion.create(
-            engine="text-davinci-003",
-            prompt=prompt,
-            max_tokens=50,
+        # Używamy ChatCompletion, model GPT-3.5-turbo
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Jesteś ekspertem od cen środków rolniczych."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=150,
             temperature=0.7
         )
-        result_text = response.choices[0].text.strip()
+        result_text = response.choices[0].message.content.strip()
         return {"price_estimate": result_text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
