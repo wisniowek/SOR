@@ -1,191 +1,374 @@
-# -*- coding: utf-8 -*-
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Interaktywna wyszukiwarka SOR</title>
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css?family=Roboto:400,500&display=swap" rel="stylesheet">
+  <style>
+    /* Animowane tło – podmień URL-e na własne */
+    body::before, body::after {
+      content: "";
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-size: cover;
+      background-position: center;
+      z-index: -2;
+      opacity: 0;
+      animation: bgFade 30s infinite;
+    }
+    body::before {
+      background-image: url('https://example.com/apple_orchard.gif'); /* filmik sadownika opryskującego sad jabłkowy */
+      animation-delay: 0s;
+    }
+    body::after {
+      background-image: url('https://example.com/grain_field.gif'); /* filmik oprysku wielkich połaci zboża */
+      animation-delay: 15s;
+    }
+    @keyframes bgFade {
+      0%, 40% { opacity: 1; }
+      50%, 90% { opacity: 0; }
+      100% { opacity: 1; }
+    }
 
-import os
-from typing import Optional
+    /* Globalny ciemny motyw i czcionki */
+    body {
+      font-family: 'Roboto', sans-serif;
+      background-color: #121212;
+      color: #e0e0e0;
+      margin: 20px;
+      max-width: 800px;
+      line-height: 1.6;
+      position: relative;
+    }
+    h1, p {
+      text-align: center;
+    }
+    /* Kontenery dla inputów z własnym autouzupełnianiem */
+    .input-container {
+      position: relative;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-top: 15px;
+      font-weight: 500;
+    }
+    input {
+      width: 300px;
+      padding: 8px;
+      margin-top: 5px;
+      border: 1px solid #333;
+      border-radius: 4px;
+      background-color: #1e1e1e;
+      color: #e0e0e0;
+      transition: border-color 0.3s;
+    }
+    input:focus {
+      border-color: #bb86fc;
+      outline: none;
+    }
+    button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      cursor: pointer;
+      border: none;
+      border-radius: 4px;
+      background-color: #bb86fc;
+      color: #121212;
+      font-weight: 500;
+      transition: background-color 0.3s, transform 0.2s;
+    }
+    button:hover {
+      background-color: #9b68ea;
+      transform: scale(1.02);
+    }
+    /* Własny dropdown autouzupełniania */
+    .autocomplete-suggestions {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background-color: #1e1e1e;
+      border: 1px solid #333;
+      border-top: none;
+      z-index: 10;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .suggestion-item {
+      padding: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .suggestion-item:hover {
+      background-color: #333;
+    }
+    /* Style kart wyników */
+    .result-card {
+      background-color: #1e1e1e;
+      padding: 15px;
+      margin-bottom: 15px;
+      border-radius: 6px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.6);
+    }
+    .summary-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid #333;
+      padding-bottom: 10px;
+    }
+    .primary-field {
+      background: rgba(187, 134, 252, 0.2);
+      padding: 5px 10px;
+      border-radius: 4px;
+      margin-bottom: 5px;
+    }
+    .result-card button {
+      background-color: #bb86fc;
+      border: none;
+      border-radius: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+      margin-left: auto;
+    }
+    .result-card button:hover {
+      background-color: #9b68ea;
+    }
+    .detail-row {
+      display: none;
+      padding-top: 10px;
+      margin-top: 10px;
+    }
+    .detail-row p {
+      margin: 4px 0;
+      font-size: 0.9em;
+    }
+    /* Styl dla przycisku "Oszacuj cenę" i pola z wynikiem */
+    .price-container {
+      margin-top: 10px;
+    }
+    .price-result {
+      margin-top: 5px;
+      font-style: italic;
+      color: #bb86fc;
+    }
+    /* Responsywność */
+    @media (max-width: 600px) {
+      body {
+        margin: 10px;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Interaktywna wyszukiwarka SOR</h1>
+  <p>Wpisz fragment w jednym lub kilku polach. Wybierz podpowiedź, kliknij wyszukaj – wyniki pojawią się jako interaktywne karty.</p>
 
-import numpy as np
-import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+  <!-- Pola wyszukiwania z własnym autouzupełnianiem -->
+  <div class="input-container">
+    <label for="uprawaInput">Uprawa:</label>
+    <input type="text" id="uprawaInput" placeholder="np. ziemniak">
+    <div class="autocomplete-suggestions" id="uprawaSuggestions"></div>
+  </div>
+  <div class="input-container">
+    <label for="agrofagInput">Agrofag:</label>
+    <input type="text" id="agrofagInput" placeholder="np. stonka ziemniaczana">
+    <div class="autocomplete-suggestions" id="agrofagSuggestions"></div>
+  </div>
+  <div class="input-container">
+    <label for="nazwaInput">Nazwa środka:</label>
+    <input type="text" id="nazwaInput" placeholder="np. Aceplan">
+    <div class="autocomplete-suggestions" id="nazwaSuggestions"></div>
+  </div>
+  <div class="input-container">
+    <label for="subInput">Substancja czynna:</label>
+    <input type="text" id="subInput" placeholder="np. acetamipryd">
+    <div class="autocomplete-suggestions" id="subSuggestions"></div>
+  </div>
 
-app = FastAPI()
+  <!-- Przycisk wyszukiwania -->
+  <button onclick="wyszukaj()">Wyszukaj</button>
 
-# Dodanie CORS (umożliwia wywołania z innych domen)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # W produkcji lepiej podać konkretną domenę
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+  <!-- Kontener na wyniki -->
+  <div id="results"></div>
 
-# Ścieżka do pliku Excel (musi być w tym samym katalogu co main.py)
-EXCEL_PATH = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
+  <script>
+    // USTAW: Adres Twojego API (bez końcowego slash)
+    const API_BASE = "https://sor.onrender.com";
 
-# Kolumny, które chcesz w wyniku (pomijamy te z "NIE ŁADUJ")
-KEEP_COLS = [
-    "nazwa",
-    "NrZezw",
-    "TerminZezw",
-    "TerminDoSprzedazy",
-    "TerminDoStosowania",
-    "Rodzaj",
-    "Substancja_czynna",
-    "uprawa",
-    "agrofag",
-    "dawka",
-    "termin",
-]
+    // Globalne tablice z danymi do autouzupełniania
+    let uprawaValues = [];
+    let agrofagValues = [];
+    let nazwaValues = [];
+    let subValues = [];
 
-# Mapa: nazwy kolumn -> docelowe nazwy w JSON
-COLUMN_MAPPING = {
-    "nazwa": "Nazwa",
-    "NrZezw": "Numer zezwolenia",
-    "TerminZezw": "Termin zezwolenia",
-    "TerminDoSprzedazy": "Termin dopuszczenia do sprzedaży",
-    "TerminDoStosowania": "Termin dopuszczenia do sprzedaży",  # Uwaga: ta sama wartość co TerminDoSprzedazy
-    "Rodzaj": "Rodzaj",
-    "Substancja_czynna": "Substancja czynna",
-    "uprawa": "Uprawa",
-    "agrofag": "Agrofag",
-    "dawka": "Dawka",
-    "termin": "Termin stosowania",
-}
+    // Po załadowaniu strony pobieramy dane z API oraz inicjujemy autouzupełnianie
+    window.addEventListener('DOMContentLoaded', async () => {
+      await fetchDistinctValues();
+      setupAutocomplete(document.getElementById("uprawaInput"), document.getElementById("uprawaSuggestions"), uprawaValues);
+      setupAutocomplete(document.getElementById("agrofagInput"), document.getElementById("agrofagSuggestions"), agrofagValues);
+      setupAutocomplete(document.getElementById("nazwaInput"), document.getElementById("nazwaSuggestions"), nazwaValues);
+      setupAutocomplete(document.getElementById("subInput"), document.getElementById("subSuggestions"), subValues);
+    });
 
-# Wczytanie pliku Excel i przygotowanie DataFrame
-try:
-    df = pd.read_excel(EXCEL_PATH, sheet_name="Rejestr_zastosowanie")
-    # Usuwamy spacje w nagłówkach
-    df.columns = df.columns.str.strip()
+    // Funkcja pobierająca dane distinct z API
+    async function fetchDistinctValues() {
+      try {
+        const up = await fetch(`${API_BASE}/distinct?col=uprawa`).then(res => res.json());
+        const ag = await fetch(`${API_BASE}/distinct?col=agrofag`).then(res => res.json());
+        const na = await fetch(`${API_BASE}/distinct?col=nazwa`).then(res => res.json());
+        const su = await fetch(`${API_BASE}/distinct?col=Substancja_czynna`).then(res => res.json());
+        uprawaValues = up.distinct_values || [];
+        agrofagValues = ag.distinct_values || [];
+        nazwaValues = na.distinct_values || [];
+        subValues = su.distinct_values || [];
+      } catch(e) {
+        console.error("Błąd pobierania danych distinct:", e);
+      }
+    }
 
-    # Sprawdź duplikaty kolumn
-    dup_cols = df.columns[df.columns.duplicated()].unique()
-    if len(dup_cols) > 0:
-        print("⚠️ Wykryto duplikaty kolumn:", dup_cols)
-        # Usuwamy powtórki – zostaje pierwsza kolumna o danej nazwie
-        df = df.loc[:, ~df.columns.duplicated()]
+    // Funkcja do ustawienia autouzupełniania dla danego inputa
+    function setupAutocomplete(input, container, suggestions) {
+      input.addEventListener("input", function() {
+        const value = input.value.toLowerCase();
+        container.innerHTML = "";
+        if (!value) return;
+        const filtered = suggestions.filter(s => s.toLowerCase().includes(value));
+        filtered.forEach(s => {
+          const div = document.createElement("div");
+          div.classList.add("suggestion-item");
+          div.textContent = s;
+          div.addEventListener("mousedown", function(e) {
+            input.value = s;
+            container.innerHTML = "";
+          });
+          container.appendChild(div);
+        });
+      });
+      input.addEventListener("blur", function() {
+        setTimeout(() => { container.innerHTML = ""; }, 150);
+      });
+    }
 
-    print("✅ Wczytano Excel – liczba wierszy:", len(df), ", kolumny:", df.columns.tolist())
-except Exception as e:
-    print("❌ Błąd wczytywania Excela:", e)
-    df = None
+    // Funkcja wyszukująca – buduje zapytanie do API i wyświetla wyniki jako karty
+    async function wyszukaj() {
+      const up = document.getElementById("uprawaInput").value.trim();
+      const ag = document.getElementById("agrofagInput").value.trim();
+      const na = document.getElementById("nazwaInput").value.trim();
+      const su = document.getElementById("subInput").value.trim();
+      let qs = [];
+      if (up) qs.push(`uprawa=${encodeURIComponent(up)}`);
+      if (ag) qs.push(`agrofag=${encodeURIComponent(ag)}`);
+      if (na) qs.push(`nazwa=${encodeURIComponent(na)}`);
+      if (su) qs.push(`Substancja_czynna=${encodeURIComponent(su)}`);
+      let url = `${API_BASE}/search-all`;
+      if (qs.length > 0) url += "?" + qs.join("&");
+      try {
+        const response = await fetch(url);
+        const json = await response.json();
+        displayResults(json);
+      } catch(e) {
+        document.getElementById("results").innerHTML = "<p>Błąd podczas wyszukiwania.</p>";
+      }
+    }
 
-@app.head("/")
-def head_home():
-    """
-    Obsługa metody HEAD na '/' – aby uniknąć błędu 405 Method Not Allowed.
-    """
-    return None
+    // Funkcja wyświetlająca wyniki jako interaktywne karty
+    function displayResults(data) {
+      const resultsDiv = document.getElementById("results");
+      resultsDiv.innerHTML = "";
+      if (!data.results || data.results.length === 0) {
+        resultsDiv.innerHTML = "<p>Brak wyników (0)</p>";
+        return;
+      }
+      data.results.forEach(rec => {
+        const card = document.createElement("div");
+        card.classList.add("result-card");
+        // Wiersz podsumowania z głównymi polami
+        const summary = document.createElement("div");
+        summary.classList.add("summary-row");
+        const primaryFields = ["Nazwa", "Rodzaj", "Agrofag", "Uprawa"];
+        primaryFields.forEach(field => {
+          const fieldDiv = document.createElement("div");
+          fieldDiv.classList.add("primary-field");
+          fieldDiv.textContent = rec[field] || "";
+          summary.appendChild(fieldDiv);
+        });
+        // Przycisk rozwijania szczegółów
+        const toggleBtn = document.createElement("button");
+        toggleBtn.textContent = "+";
+        toggleBtn.addEventListener("click", () => {
+          if(detail.style.display === "none" || detail.style.display === "") {
+            detail.style.display = "block";
+            toggleBtn.textContent = "-";
+          } else {
+            detail.style.display = "none";
+            toggleBtn.textContent = "+";
+          }
+        });
+        summary.appendChild(toggleBtn);
+        card.appendChild(summary);
+        // Sekcja szczegółów – pozostałe dane
+        const detail = document.createElement("div");
+        detail.classList.add("detail-row");
+        detail.style.display = "none";
+        for (const key in rec) {
+          if (primaryFields.indexOf(key) === -1) {
+            const p = document.createElement("p");
+            p.textContent = `${key}: ${rec[key]}`;
+            detail.appendChild(p);
+          }
+        }
+        // Dodaj przycisk "Oszacuj cenę" oraz kontener na wynik
+        const priceContainer = document.createElement("div");
+        priceContainer.classList.add("price-container");
+        const priceBtn = document.createElement("button");
+        priceBtn.textContent = "Oszacuj cenę";
+        const priceResult = document.createElement("div");
+        priceResult.classList.add("price-result");
+        priceContainer.appendChild(priceBtn);
+        priceContainer.appendChild(priceResult);
+        detail.appendChild(priceContainer);
+        // Obsługa przycisku "Oszacuj cenę"
+        priceBtn.addEventListener("click", () => {
+          // Upewnij się, że pobieramy właściwą nazwę z pola "Nazwa"
+          const effectiveName = rec["Nazwa"] && rec["Nazwa"].trim() ? rec["Nazwa"] : "nieznany środek";
+          oszacujCene(effectiveName, priceResult);
+        });
+        card.appendChild(detail);
+        resultsDiv.appendChild(card);
+      });
+    }
 
-@app.get("/")
-def home():
-    """
-    Strona główna – informuje, czy dane zostały poprawnie wczytane.
-    """
-    if df is None:
-        content = {"message": "Brak danych Excel. Sprawdź logi."}
-    else:
-        content = {"message": "API SOR działa – filtry (ręczne parametry), polskie znaki (ą, ś, ć, ź, ż)"}
-    return JSONResponse(content=content, media_type="application/json; charset=utf-8")
-
-@app.get("/distinct")
-def get_distinct_values(col: str = Query(..., description="Nazwa kolumny, z której chcesz uzyskać unikalne wartości")):
-    """
-    Endpoint zwraca unikalne wartości z podanej kolumny.
-    Przykład: GET /distinct?col=uprawa
-    """
-    if df is None:
-        raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane.")
-
-    # Upewnij się, że podana kolumna istnieje w DataFrame
-    if col not in df.columns:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Kolumna '{col}' nie występuje. Dostępne kolumny: {list(df.columns)}"
-        )
-
-    # Pobierz unikalne wartości, pomijając NaN
-    distinct_vals = df[col].drop_duplicates().dropna().tolist()
-
-    return JSONResponse(
-        content={"column": col, "distinct_values": distinct_vals},
-        media_type="application/json; charset=utf-8"
-    )
-
-@app.get("/search-all")
-def search_all(
-    nazwa: Optional[str] = None,
-    NrZezw: Optional[str] = None,
-    TerminZezw: Optional[str] = None,
-    TerminDoSprzedazy: Optional[str] = None,
-    TerminDoStosowania: Optional[str] = None,
-    Rodzaj: Optional[str] = None,
-    Substancja_czynna: Optional[str] = None,
-    uprawa: Optional[str] = None,
-    agrofag: Optional[str] = None,
-    dawka: Optional[str] = None,
-    termin: Optional[str] = None
-):
-    """
-    Filtrowanie w kolumnach:
-      - nazwa
-      - NrZezw
-      - TerminZezw
-      - TerminDoSprzedazy
-      - TerminDoStosowania
-      - Rodzaj
-      - Substancja_czynna
-      - uprawa
-      - agrofag
-      - dawka
-      - termin
-
-    Jeśli parametr jest podany, stosowane jest filtrowanie metodą .str.contains(...)
-    (bez uwzględnienia wielkości liter i z pominięciem wartości NaN).
-    """
-    if df is None:
-        raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane.")
-
-    results = df.copy()
-
-    # Każdy parametr jest sprawdzany i stosowany jako filtr, jeśli został podany
-    if nazwa:
-        results = results[results["nazwa"].str.contains(nazwa, case=False, na=False)]
-    if NrZezw:
-        results = results[results["NrZezw"].str.contains(NrZezw, case=False, na=False)]
-    if TerminZezw:
-        results = results[results["TerminZezw"].astype(str).str.contains(TerminZezw, case=False, na=False)]
-    if TerminDoSprzedazy:
-        results = results[results["TerminDoSprzedazy"].astype(str).str.contains(TerminDoSprzedazy, case=False, na=False)]
-    if TerminDoStosowania:
-        results = results[results["TerminDoStosowania"].astype(str).str.contains(TerminDoStosowania, case=False, na=False)]
-    if Rodzaj:
-        results = results[results["Rodzaj"].str.contains(Rodzaj, case=False, na=False)]
-    if Substancja_czynna:
-        results = results[results["Substancja_czynna"].str.contains(Substancja_czynna, case=False, na=False)]
-    if uprawa:
-        results = results[results["uprawa"].str.contains(uprawa, case=False, na=False)]
-    if agrofag:
-        results = results[results["agrofag"].str.contains(agrofag, case=False, na=False)]
-    if dawka:
-        results = results[results["dawka"].str.contains(dawka, case=False, na=False)]
-    if termin:
-        results = results[results["termin"].str.contains(termin, case=False, na=False)]
-
-    # Zostawiamy tylko dozwolone kolumny
-    results = results[KEEP_COLS]
-
-    # Zmieniamy nazwy kolumn zgodnie z mapowaniem
-    results = results.rename(columns=COLUMN_MAPPING)
-
-    # Konwertujemy wartości do string, zastępujemy "nan" i "NaT" na None
-    results = results.astype(str).replace("nan", None).replace("NaT", None)
-
-    # Zamieniamy DataFrame na listę słowników
-    data_list = results.to_dict(orient="records")
-
-    return JSONResponse(
-        content={"count": len(data_list), "results": data_list},
-        media_type="application/json; charset=utf-8"
-    )
+    // Funkcja symulująca wywołanie AI do oszacowania ceny
+    function oszacujCene(nazwa, resultDiv) {
+      if (!nazwa || nazwa.trim() === "") {
+        resultDiv.textContent = "Nie znaleziono nazwy środka. Sprawdź dane.";
+        return;
+      }
+      console.log("Oszacowywana nazwa:", nazwa);
+      const promptText = `Jaka jest cena środka "${nazwa}" na polskim internecie w różnych opakowaniach? Zwróć średnią dla danych opakowań z rynku polskiego. Jeżeli brak takich informacji, zwróć: skontaktuj się z lokalnym dystrybutorem SOR.`;
+      console.log("Prompt dla AI:", promptText);
+      resultDiv.textContent = "Oszacowywanie ceny...";
+      setTimeout(() => {
+        if (Math.random() > 0.5) {
+          let price = (Math.random() * 150 + 50).toFixed(2);
+          resultDiv.textContent = `Średnia cena: ${price} PLN`;
+        } else {
+          resultDiv.textContent = "Skontaktuj się z lokalnym dystrybutorem SOR";
+        }
+      }, 1500);
+    }
+  </script>
+</body>
+</html>
