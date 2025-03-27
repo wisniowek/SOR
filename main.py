@@ -22,7 +22,7 @@ app.add_middleware(
 )
 
 # Ustawienie klucza API OpenAI (upewnij się, że zmienna OPENAI_API_KEY jest ustawiona)
-openai.api_key = os.environ.get("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")
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 # Ścieżka do pliku Excel (musi być w tym samym katalogu co main.py)
 EXCEL_PATH = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
@@ -62,14 +62,12 @@ try:
     df = pd.read_excel(EXCEL_PATH, sheet_name="Rejestr_zastosowanie")
     # Usuwamy spacje w nagłówkach
     df.columns = df.columns.str.strip()
-
     # Sprawdź duplikaty kolumn
     dup_cols = df.columns[df.columns.duplicated()].unique()
     if len(dup_cols) > 0:
         print("⚠️ Wykryto duplikaty kolumn:", dup_cols)
         # Usuwamy powtórki – zostaje pierwsza kolumna o danej nazwie
         df = df.loc[:, ~df.columns.duplicated()]
-
     print("✅ Wczytano Excel – liczba wierszy:", len(df), ", kolumny:", df.columns.tolist())
 except Exception as e:
     print("❌ Błąd wczytywania Excela:", e)
@@ -101,15 +99,12 @@ def get_distinct_values(col: str = Query(..., description="Nazwa kolumny, z któ
     """
     if df is None:
         raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane.")
-
     if col not in df.columns:
         raise HTTPException(
             status_code=404,
             detail=f"Kolumna '{col}' nie występuje. Dostępne kolumny: {list(df.columns)}"
         )
-
     distinct_vals = df[col].drop_duplicates().dropna().tolist()
-
     return JSONResponse(
         content={"column": col, "distinct_values": distinct_vals},
         media_type="application/json; charset=utf-8"
@@ -130,12 +125,12 @@ def search_all(
     termin: Optional[str] = None
 ):
     """
-    Filtrowanie w kolumnach. Jeśli parametr jest podany, stosowane jest filtrowanie metodą .str.contains(...)
+    Filtrowanie w kolumnach.
+    Jeśli parametr jest podany, stosowane jest filtrowanie metodą .str.contains(...)
     (bez uwzględnienia wielkości liter i z pominięciem wartości NaN).
     """
     if df is None:
         raise HTTPException(status_code=500, detail="Dane z Excela nie zostały wczytane.")
-
     results = df.copy()
     if nazwa:
         results = results[results["nazwa"].str.contains(nazwa, case=False, na=False)]
@@ -159,12 +154,10 @@ def search_all(
         results = results[results["dawka"].str.contains(dawka, case=False, na=False)]
     if termin:
         results = results[results["termin"].str.contains(termin, case=False, na=False)]
-
     results = results[KEEP_COLS]
     results = results.rename(columns=COLUMN_MAPPING)
     results = results.astype(str).replace("nan", None).replace("NaT", None)
     data_list = results.to_dict(orient="records")
-
     return JSONResponse(
         content={"count": len(data_list), "results": data_list},
         media_type="application/json; charset=utf-8"
@@ -180,7 +173,6 @@ async def estimate_price(item: dict):
     if not prompt:
         raise HTTPException(status_code=400, detail="Pole 'prompt' jest wymagane.")
     try:
-        # Używamy ChatCompletion, model GPT-3.5-turbo
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -193,4 +185,5 @@ async def estimate_price(item: dict):
         result_text = response.choices[0].message.content.strip()
         return {"price_estimate": result_text}
     except Exception as e:
+        print("Error in /estimate-price:", e)
         raise HTTPException(status_code=500, detail=str(e))
