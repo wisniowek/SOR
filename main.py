@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 from typing import Optional
+import math
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
@@ -87,10 +88,16 @@ def search_all(
     for col, term in filters.items():
         if term:
             results = results[results[col].astype(str).str.contains(term, case=False, na=False)]
-    # select + rename + convert NaN->None
     results = results[KEEP_COLS].rename(columns=COLUMN_MAPPING)
-    results = results.where(pd.notnull(results), None)
-    records = results.to_dict(orient="records")
+    # Replace NaN, inf, -inf with None for JSON compatibility
+    def sanitize(val):
+        if pd.isna(val) or (isinstance(val, (float,)) and not math.isfinite(val)):
+            return None
+        return val
+    records = []
+    for rec in results.to_dict(orient="records"):
+        clean = {k: sanitize(v) for k, v in rec.items()}
+        records.append(clean)
     return {"count": len(records), "results": records}
 
 @app.post("/estimate-price")
