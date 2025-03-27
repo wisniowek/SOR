@@ -173,8 +173,8 @@ async def estimate_price(item: dict):
     if not prompt:
         raise HTTPException(status_code=400, detail="Pole 'prompt' jest wymagane.")
     try:
-        # Używamy asynchronicznej wersji ChatCompletion
-        response = await openai.ChatCompletion.acreate(
+        # Używamy asynchronicznej metody create zgodnie z nowym interfejsem
+        response = await openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "Jesteś ekspertem od cen środków rolniczych."},
