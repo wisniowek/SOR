@@ -5,10 +5,11 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-import openai
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+import httpx  # <-- biblioteka do zapytań asynchronicznych
 
 app = FastAPI()
 
@@ -21,8 +22,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Ustawienie klucza API OpenAI (upewnij się, że zmienna OPENAI_API_KEY jest ustawiona)
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+# --------------------------------
+# 1. Klucz API DeepSeek zamiast OpenAI
+# --------------------------------
+DEESEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")  # <-- ZAŁÓŻ, że tu jest Twój klucz
 
 # Ścieżka do pliku Excel (musi być w tym samym katalogu co main.py)
 EXCEL_PATH = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
@@ -48,7 +51,7 @@ COLUMN_MAPPING = {
     "NrZezw": "Numer zezwolenia",
     "TerminZezw": "Termin zezwolenia",
     "TerminDoSprzedazy": "Termin dopuszczenia do sprzedaży",
-    "TerminDoStosowania": "Termin dopuszczenia do sprzedaży",  # Uwaga: ta sama wartość co TerminDoSprzedazy
+    "TerminDoStosowania": "Termin dopuszczenia do sprzedaży",  # Uwaga: duplikat z powyższym
     "Rodzaj": "Rodzaj",
     "Substancja_czynna": "Substancja czynna",
     "uprawa": "Uprawa",
@@ -163,28 +166,66 @@ def search_all(
         media_type="application/json; charset=utf-8"
     )
 
+# -----------------------------------------------
+# 2. Endpoint korzystający teraz z DeepSeek
+# -----------------------------------------------
 @app.post("/estimate-price")
 async def estimate_price(item: dict):
     """
-    Endpoint korzystający z OpenAI do oszacowania ceny na podstawie promptu.
+    Endpoint korzystający z DeepSeek do oszacowania ceny na podstawie promptu.
     Oczekuje JSON w formacie: { "prompt": "..." }
     """
+
+    if not DEESEEK_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="Brak zmiennej środowiskowej DEEPSEEK_API_KEY z kluczem do DeepSeek."
+        )
+
     prompt = item.get("prompt")
     if not prompt:
         raise HTTPException(status_code=400, detail="Pole 'prompt' jest wymagane.")
-    try:
-        # Używamy asynchronicznej metody acreate zgodnie z nowym interfejsem
-        response = await openai.ChatCompletion.acreate(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Jesteś ekspertem od cen środków rolniczych."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=150,
-            temperature=0.7
-        )
-        result_text = response.choices[0].message.content.strip()
-        return {"price_estimate": result_text}
-    except Exception as e:
-        print("Error in /estimate-price:", e)
-        raise HTTPException(status_code=500, detail=str(e))
+
+    # <-- WAŻNE: dostosuj do dokumentacji DeepSeek
+    # Zakładamy, że DeepSeek używa podobnej struktury co OpenAI ChatCompletion:
+    # POST https://api.deepseek.com/v1/chat/completions
+    # JSON: {"model": "deepseek-chat", "messages": [...], "max_tokens": 150, "temperature": 0.7, ... }
+
+    deepseek_url = "https://api.deepseek.com/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {DEESEEK_API_KEY}"
+    }
+    data = {
+        "model": "deepseek-chat",  # <-- dostosuj do nazwy modelu w DeepSeek
+        "messages": [
+            {"role": "system", "content": "Jesteś ekspertem od cen środków rolniczych."},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 150,
+        "temperature": 0.7
+    }
+
+    # Wywołanie API za pomocą httpx w trybie async
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(deepseek_url, json=data, headers=headers, timeout=30.0)
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=500, detail=f"Problem z połączeniem do DeepSeek: {str(e)}")
+
+        if response.status_code != 200:
+            # Można zajrzeć w text, by zobaczyć zwrotkę z serwera
+            raise HTTPException(status_code=500, detail=f"Błąd DeepSeek: {response.text}")
+
+        try:
+            response_data = response.json()
+            # Zakładamy, że odpowiedź ma pole "choices" -> [0] -> "message" -> "content"
+            result_text = response_data["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError) as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Nie udało się sparsować odpowiedzi od DeepSeek. Szczegóły: {str(e)}.\nTreść: {response.text}"
+            )
+
+    return {"price_estimate": result_text}
+
