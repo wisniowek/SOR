@@ -26,12 +26,22 @@ if not DEESEEK_API_KEY:
 
 # Excel configuration
 EXCEL_PATH = os.path.join(os.path.dirname(__file__), "Rejestr_zastosowanie.xlsx")
-KEEP_COLS = ["nazwa","NrZezw","TerminZezw","TerminDoSprzedazy","TerminDoStosowania","Rodzaj","Substancja_czynna","uprawa","agrofag","dawka","termin"]
+KEEP_COLS = [
+    "nazwa", "NrZezw", "TerminZezw", "TerminDoSprzedazy", "TerminDoStosowania",
+    "Rodzaj", "Substancja_czynna", "uprawa", "agrofag", "dawka", "termin"
+]
 COLUMN_MAPPING = {
-    "nazwa":"Nazwa","NrZezw":"Numer zezwolenia","TerminZezw":"Termin zezwolenia",
-    "TerminDoSprzedazy":"Termin dopuszczenia do sprzedaży","TerminDoStosowania":"Termin dopuszczenia do sprzedaży",
-    "Rodzaj":"Rodzaj","Substancja_czynna":"Substancja czynna","uprawa":"Uprawa",
-    "agrofag":"Agrofag","dawka":"Dawka","termin":"Termin stosowania"
+    "nazwa": "Nazwa",
+    "NrZezw": "Numer zezwolenia",
+    "TerminZezw": "Termin zezwolenia",
+    "TerminDoSprzedazy": "Termin dopuszczenia do sprzedaży",
+    "TerminDoStosowania": "Termin dopuszczenia do stosowania",
+    "Rodzaj": "Rodzaj",
+    "Substancja_czynna": "Substancja czynna",
+    "uprawa": "Uprawa",
+    "agrofag": "Agrofag",
+    "dawka": "Dawka",
+    "termin": "Termin stosowania",
 }
 
 # Load Excel
@@ -39,14 +49,14 @@ try:
     df = pd.read_excel(EXCEL_PATH, sheet_name="Rejestr_zastosowanie")
     df.columns = df.columns.str.strip()
     df = df.loc[:, ~df.columns.duplicated()]
-    print(f"✅ Loaded Excel: {len(df)} rows")
+    print(f"✅ Loaded Excel: {len(df)} rows, columns: {list(df.columns)}")
 except Exception as e:
     print(f"❌ Error loading Excel: {e}")
     df = None
 
 @app.get("/")
 def home():
-    return JSONResponse({"message":"API is live"})
+    return JSONResponse({"message": "API is live"})
 
 @app.get("/distinct")
 def get_distinct(col: str = Query(...)):
@@ -69,7 +79,7 @@ def search_all(
     results = df.copy()
     filters = {
         "nazwa": nazwa, "NrZezw": NrZezw, "TerminZezw": TerminZezw,
-        "TerminDoSprzedazy": TerminDoSprzedazy, "TerminDoStosowania": TerminDoSprzedazy,
+        "TerminDoSprzedazy": TerminDoSprzedazy, "TerminDoStosowania": TerminDoStosowania,
         "Rodzaj": Rodzaj, "Substancja_czynna": Substancja_czynna,
         "uprawa": uprawa, "agrofag": agrofag,
         "dawka": dawka, "termin": termin
@@ -77,8 +87,11 @@ def search_all(
     for col, term in filters.items():
         if term:
             results = results[results[col].astype(str).str.contains(term, case=False, na=False)]
-    results = results[KEEP_COLS].rename(columns=COLUMN_MAPPING).replace({"nan":None,"NaT":None})
-    return {"count": len(results), "results": results.to_dict(orient="records")}
+    # select + rename + convert NaN->None
+    results = results[KEEP_COLS].rename(columns=COLUMN_MAPPING)
+    results = results.where(pd.notnull(results), None)
+    records = results.to_dict(orient="records")
+    return {"count": len(records), "results": records}
 
 @app.post("/estimate-price")
 async def estimate_price(item: dict):
@@ -89,7 +102,10 @@ async def estimate_price(item: dict):
         raise HTTPException(500, "Missing DEEPSEEK_API_KEY")
     url = "https://api.deepseek.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {DEESEEK_API_KEY}", "Content-Type": "application/json"}
-    data = {"model":"deepseek-chat","messages":[{"role":"system","content":"You are an expert on agricultural product pricing."},{"role":"user","content":prompt}],"max_tokens":150,"temperature":0.7}
+    data = {"model": "deepseek-chat", "messages": [
+        {"role": "system", "content": "You are an expert on agricultural product pricing."},
+        {"role": "user", "content": prompt}
+    ], "max_tokens": 150, "temperature": 0.7}
     async with httpx.AsyncClient() as client:
         response = await client.post(url, json=data, headers=headers, timeout=30)
     print("🔍 DeepSeek status:", response.status_code)
